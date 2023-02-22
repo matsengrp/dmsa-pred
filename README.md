@@ -14,7 +14,12 @@ When intergrating into an existing Nextstrain build, the primary steps to take a
 2. Add the appropriate dependency of the resulting JSON's into the main workflow
 3. install the dependencies:
 ```
-$ nextstrain shell
+$ conda activate ~/.nextstrain/runtimes/conda/env
 $ snakemake --use-conda --cores 2 --create-envs-only --configfile dmsa-pipeline/dmsa-pred-reference.yaml
 ```
+Now you can run the pipeline:
+```
+snakemake --use-conda --cores 4 --configfile dmsa-pipeline/dmsa-pred-reference.yaml
+```
+
 
