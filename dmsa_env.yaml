@@ -8,4 +8,4 @@ dependencies:
   - pip
   - pip:
     - polyclonal @ git+https://github.com/jbloomlab/polyclonal@fd87e2647f9101f881d6bb25c0d29942253f9d01
-    - nextstrain-augur=19.2.0
+    - nextstrain-augur==19.2.0
