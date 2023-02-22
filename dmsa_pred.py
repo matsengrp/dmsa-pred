@@ -30,6 +30,31 @@ from Bio.Seq import Seq
 import polyclonal
 
 
+# TODO Bio.Align may be faster?
+def fasta_to_df(fasta_file):
+    """simply convert a fasta to dataframe"""
+
+    ids, seqs = [], []
+    for seq_record in SeqIO.parse(fasta_file, "fasta"):  # (generator)
+        ids.append(seq_record.id)
+        seqs.append(str(seq_record.seq))
+    return pd.DataFrame({"strain": ids, "seq": seqs}).set_index("strain")
+
+
+def mutations(naive_aa, aa, allowed_subs):
+    """Amino acid substitutions between two sequences, in IMGT coordinates."""
+
+    assert len(naive_aa) == len(aa)
+    return " ".join(
+        [
+            f"{aa1}{pos+1}{aa2}"
+            for pos, (aa1, aa2) in enumerate(zip(naive_aa, aa))
+            if aa1 != aa2 and f"{aa1}{pos+1}{aa2}" in allowed_subs
+        ]
+    )
+
+
+
 # entry point
 @group(context_settings={"help_option_names": ["-h", "--help"]})
 def cli():
@@ -94,7 +119,7 @@ def polyclonal_escape_prediction(
     """
 
 
-    concentrations = [float(item) for item in concentrations_list.split(',')]
+    concentrations = [float(item) for item in concentrations.split(',')]
     mut_escape_df = pd.read_csv(mut_escape_df)
 
     # TODO remove these pre-emptively? or pass as parameter to script?
@@ -118,7 +143,7 @@ def polyclonal_escape_prediction(
         alignment = fasta_to_df(open(alignment, "r"))
 
     # TODO does this really even need to be in nextstrain tree?
-    dms_wildtype = alignment.loc[dms_wt_seq, "seq"]
+    dms_wildtype = alignment.loc[dms_wt_seq_id, "seq"]
     
     # TODO N jobs? pandarallel apply()
     alignment["aa_substitutions"] = alignment.seq.apply(
@@ -138,7 +163,11 @@ def polyclonal_escape_prediction(
     for strain, strain_df in escape_probs.groupby("strain"):
         for idx, row in strain_df.iterrows():
             ret_json["nodes"][strain][
-                f"prob_escape_{antibody}_c_{row.concentration}"
+                f"prob_escape_{serum_label}_c_{row.concentration}"
             ] = row.predicted_prob_escape
 
     write_json(ret_json, output)
+
+
+if __name__ == '__main__':
+    cli()
