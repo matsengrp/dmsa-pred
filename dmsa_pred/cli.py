@@ -10,24 +10,18 @@ Command line interface (CLI) for dmsa-pred.
 # built-in
 import gzip
 import glob
+import sys
+import lzma
+from collections import defaultdict
+import json
+# import argparse
 
 # dependencies
 import pandas as pd
 from click import Path, group, option, argument
 import click
 
-# local
-# from dmsa-pred import utils
-# from dmsa-pred.string import string_ds
-
-import sys
-import lzma
-from collections import defaultdict
-import json
-import argparse
-
 # existing deps
-import pandas as pd
 from augur.utils import write_json
 from Bio import SeqIO
 from Bio.Seq import Seq
@@ -41,75 +35,110 @@ import polyclonal
 def cli():
     """
     Welcome to the dmsa-pred CLI!
-
-    Here we present a few commands that allow users to
-    slice, transform, normalize, fit models to, and more given
-    a binary pickle dump'd xarray, usually as a result of running the
-    PhIP-Flow pipeline.
-
-    For more information and example workflows please refer to
-    the full documentation
-    at https://matsengrp.github.io/dmsa-pred/
     """
     pass
 
 
-@cli.command(name="load-from-csv")
+@cli.command(name="polyclonal-escape")
 @option(
-    "-s",
-    "--sample_table",
+    "--alignment",
     required=True,
     type=Path(exists=True),
-    help="Path to sample table csv.",
+    help="",
 )
 @option(
-    "-p",
-    "--peptide_table",
+    "--mut-escape-df",
     required=True,
     type=Path(exists=True),
-    help="Path to peptide table csv.",
+    help="",
 )
 @option(
-    "-c",
-    "--counts_matrix",
+    "--activity-wt-df",
     required=True,
     type=Path(exists=True),
-    help="Path to counts matrix csv.",
+    help="",
 )
 @option(
-    "-o",
+    "--dms-wt-seq-id",
+    required=True,
+    type=str,
+    help="",
+)
+@option(
+    "--serum-label",
+    required=True,
+    type=str,
+    help="",
+)
+@option(
+    "--concentrations",
+    required=True,
+    type=str,
+    help="",
+)
+@option(
     "--output",
     required=True,
     help="Path where the phip dataset will be dump'd to netCDF",
 )
-def load_from_csv(
-    sample_table,
-    peptide_table,
-    counts_matrix,
-    output,
+def polyclonal_escape_prediction(
+    alignment,
+    mut_escape_df,
+    activity_wt_df,
+    dms_wt_seq_id,
+    serum_label,
+    concentrations,
+    output
 ):
     """
-    Load and dump xarray dataset given a set of wide csv's
-
-    Using this command usually means you have either:
-
-    1. Decided to store the output of your analysis in the form
-       of wide csv's instead of a pickle dump'd binary for
-       longer-term storage.
-
-    2. Created your own enrichment matrix
-       without the help of the phip-flow alignment pipeline.
-
-    \f
-
-    .. note::
-      In the case of #2, please note that your matrix data
-      must be numeric and have shape (len(peptide_table), len(sample_table)).
-      Finally, you must include
-      :ref:`pipeline outputs <sec_pipeline_outputs>`
-
-    .. note::
-      Currently only accepting a single enrichment matrix.
     """
 
-    ds = utils.dataset_from_csv(counts_matrix, peptide_table, sample_table)
+
+    concentrations = [float(item) for item in concentrations_list.split(',')]
+    mut_escape_df = pd.read_csv(mut_escape_df)
+
+    # TODO remove these pre-emptively? or pass as parameter to script?
+    sites_to_ignore = ["214a", "214b", "214c"]
+    mut_escape_df = mut_escape_df[~mut_escape_df["site"].isin(sites_to_ignore)]
+    mut_escape_df["escape"] = mut_escape_df["escape_median"]
+
+    # Instantiate a Polyclonal object with betas and wildtype activity.
+    model = polyclonal.Polyclonal(
+        activity_wt_df=pd.read_csv(activity_wt_df),
+        mut_escape_df=mut_escape_df,
+        data_to_fit=None,
+        alphabet=polyclonal.alphabets.AAS_WITHSTOP_WITHGAP,
+    )
+
+    # Mutation calling relative to the dms wildtype sequence.
+    if alignment[-2:] == "xz":
+        with lzma.open(alignment, "rt") as f:
+            alignment = fasta_to_df(f)
+    else:
+        alignment = fasta_to_df(open(alignment, "r"))
+
+    # TODO does this really even need to be in nextstrain tree?
+    dms_wildtype = alignment.loc[dms_wt_seq, "seq"]
+    
+    # TODO N jobs? pandarallel apply()
+    alignment["aa_substitutions"] = alignment.seq.apply(
+        lambda aligned_seq: mutations(dms_wildtype, aligned_seq, set(model.mutations))
+    )
+    alignment.reset_index(inplace=True)
+
+    escape_probs = (
+        model.prob_escape(
+            variants_df=alignment, concentrations=concentrations
+        )
+        .drop("seq", axis=1)
+        .reset_index()
+    )
+
+    ret_json = {"generated_by": {"program": "polyclonal"}, "nodes": defaultdict(dict)}
+    for strain, strain_df in escape_probs.groupby("strain"):
+        for idx, row in strain_df.iterrows():
+            ret_json["nodes"][strain][
+                f"prob_escape_{antibody}_c_{row.concentration}"
+            ] = row.predicted_prob_escape
+
+    write_json(ret_json, output)
