@@ -1,3 +1,5 @@
+
+
 rule variant_escape_fraction_prediction:
     input:
         alignments = "results/{build_name}/translations/aligned.gene.S_withInternalNodes.fasta",
@@ -39,12 +41,12 @@ rule polyclonal_escape_prediction:
         mem_mb=2000
     shell:
         """
-        dmsa_pred/dmsa_pred.py polyclonal-escape \
+        python my_profiles/dmsa_pred/dmsa_pred.py polyclonal-escape \
             --alignment {input.alignments} \
             --mut-escape-df {params.mut_escape_df} \
             --activity-wt-df {params.activity_wt_df} \
             --dms-wt-seq-id {params.dms_wt_seq} \
             --serum-label {wildcards.antibody} \
-            --concentrations-list {params.concentrations} \
+            --concentrations {params.concentrations} \
             --output {output.node_data} 2>&1 | tee {log}
         """

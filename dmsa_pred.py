@@ -29,7 +29,7 @@ from Bio.Seq import Seq
 # new deps
 import polyclonal
 
-
+# shared utilities
 # TODO Bio.Align may be faster?
 def fasta_to_df(fasta_file):
     """simply convert a fasta to dataframe"""
@@ -53,7 +53,46 @@ def mutations(naive_aa, aa, allowed_subs):
         ]
     )
 
+# define all common options
+def group_options(*options):
+    """
+    custom decorator for shared options
+    """
+    def wrapper(function):
+        for option in reversed(options):
+            function = option(function)
+        return function
+    return wrapper
 
+alignment = option(
+    "--alignment",
+    required=True,
+    type=Path(exists=True),
+    help="",
+)
+mut_effects_df = option(
+    "--mut-effects-df",
+    required=True,
+    type=Path(exists=True),
+    help="",
+)
+dms_wt_seq_id = option(
+    "--dms-wt-seq-id",
+    required=True,
+    type=str,
+    help="",
+)
+experiment_label = option(
+    "--experiment-label",
+    required=True,
+    type=str,
+    help="",
+)
+output = option(
+    "--output",
+    required=True,
+    help="Path where the phip dataset will be dump'd to netCDF",
+)
 
 # entry point
 @group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -63,36 +102,11 @@ def cli():
     """
     pass
 
-
 @cli.command(name="polyclonal-escape")
-@option(
-    "--alignment",
-    required=True,
-    type=Path(exists=True),
-    help="",
-)
-@option(
-    "--mut-escape-df",
-    required=True,
-    type=Path(exists=True),
-    help="",
-)
 @option(
     "--activity-wt-df",
     required=True,
     type=Path(exists=True),
-    help="",
-)
-@option(
-    "--dms-wt-seq-id",
-    required=True,
-    type=str,
-    help="",
-)
-@option(
-    "--serum-label",
-    required=True,
-    type=str,
     help="",
 )
 @option(
@@ -101,36 +115,31 @@ def cli():
     type=str,
     help="",
 )
-@option(
-    "--output",
-    required=True,
-    help="Path where the phip dataset will be dump'd to netCDF",
-)
+@group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
 def polyclonal_escape_prediction(
-    alignment,
-    mut_escape_df,
     activity_wt_df,
-    dms_wt_seq_id,
-    serum_label,
     concentrations,
+    alignment,
+    mut_effects_df,
+    dms_wt_seq_id,
+    experiment_label,
     output
 ):
     """
     """
 
-
     concentrations = [float(item) for item in concentrations.split(',')]
-    mut_escape_df = pd.read_csv(mut_escape_df)
+    mut_effects_df = pd.read_csv(mut_effects_df)
 
     # TODO remove these pre-emptively? or pass as parameter to script?
     sites_to_ignore = ["214a", "214b", "214c"]
-    mut_escape_df = mut_escape_df[~mut_escape_df["site"].isin(sites_to_ignore)]
-    mut_escape_df["escape"] = mut_escape_df["escape_median"]
+    mut_effects_df = mut_effects_df[~mut_effects_df["site"].isin(sites_to_ignore)]
+    mut_effects_df["escape"] = mut_effects_df["escape_median"]
 
     # Instantiate a Polyclonal object with betas and wildtype activity.
     model = polyclonal.Polyclonal(
         activity_wt_df=pd.read_csv(activity_wt_df),
-        mut_escape_df=mut_escape_df,
+        mut_escape_df=mut_effects_df,
         data_to_fit=None,
         alphabet=polyclonal.alphabets.AAS_WITHSTOP_WITHGAP,
     )
@@ -163,11 +172,59 @@ def polyclonal_escape_prediction(
     for strain, strain_df in escape_probs.groupby("strain"):
         for idx, row in strain_df.iterrows():
             ret_json["nodes"][strain][
-                f"prob_escape_{serum_label}_c_{row.concentration}"
+                f"prob_escape_{experiment_label}_c_{row.concentration}"
             ] = row.predicted_prob_escape
 
     write_json(ret_json, output)
 
+@cli.command(name="escape-fraction")
+@group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
+def escape_fraction_prediction(
+    alignment,
+    mut_effects_df,
+    dms_wt_seq_id,
+    experiment_label,
+    output
+):
+    """
+    """
+
+    mut_effects_df = pd.read_csv(mut_effects_df)
+    mut_effects_df = mut_effects_df.assign(
+        non_escape_frac=(1-mut_effects_df["mut_escape_frac_epistasis_model"])
+    )
+
+    if alignment[-2:] == "xz":
+        with lzma.open(alignment, "rt") as f:
+            alignment = fasta_to_df(f)
+    else:
+        alignment = fasta_to_df(open(alignment, "r"))
+
+    dms_wildtype = alignment.loc[dms_wt_seq_id, "seq"]
+    
+    alignment["aa_substitutions"] = alignment.seq.apply(
+        lambda aligned_seq: mutations(dms_wildtype, aligned_seq, set(mut_effects_df.aa_substitution))
+    )
+    alignment.reset_index(inplace=True)
+
+    def compute_variant_escape_score(
+        aa_subs,
+        mut_effect_col = "non_escape_frac"
+    ):
+        data = mut_effects_df[mut_effects_df['aa_substitution'].isin(aa_subs.split())]
+        return 1-data[mut_effect_col].prod()
+
+    alignment["variant_escape_score"] = alignment.aa_substitutions.apply(
+        lambda aa_subs: compute_variant_escape_score(aa_subs)
+    )
+
+    ret_json = {"generated_by": {"program": "custom"}, "nodes": defaultdict(dict)}
+    for idx, row in alignment.iterrows():
+        ret_json["nodes"][row.strain][
+            f"{experiment_label}_escape_fraction"
+        ] = row.variant_escape_score
+
+    write_json(ret_json, output)
 
 if __name__ == '__main__':
     cli()
