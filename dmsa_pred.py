@@ -14,6 +14,7 @@ import sys
 import lzma
 from collections import defaultdict
 import json
+import natsort
 # import argparse
 
 # dependencies
@@ -115,10 +116,18 @@ def cli():
     type=str,
     help="",
 )
+@option(
+    "--escape-column",
+    required=False,
+    default="escape",
+    type=str,
+    help="",
+)
 @group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
 def polyclonal_escape_prediction(
     activity_wt_df,
     concentrations,
+    escape_column,
     alignment,
     mut_effects_df,
     dms_wt_seq_id,
@@ -129,18 +138,19 @@ def polyclonal_escape_prediction(
     """
 
     concentrations = [float(item) for item in concentrations.split(',')]
-    mut_effects_df = pd.read_csv(mut_effects_df)
+    mut_effects_df = pd.read_csv(mut_effects_df).rename({escape_column:"escape"}, axis=1)
 
     # TODO remove these pre-emptively? or pass as parameter to script?
-    sites_to_ignore = ["214a", "214b", "214c"]
-    mut_effects_df = mut_effects_df[~mut_effects_df["site"].isin(sites_to_ignore)]
-    mut_effects_df["escape"] = mut_effects_df["escape_median"]
+    #sites_to_ignore = ["214a", "214b", "214c"]
+    #mut_effects_df = mut_effects_df[~mut_effects_df["site"].isin(sites_to_ignore)]
+    #mut_effects_df["escape"] = mut_effects_df["escape_median"]
 
     # Instantiate a Polyclonal object with betas and wildtype activity.
     model = polyclonal.Polyclonal(
         activity_wt_df=pd.read_csv(activity_wt_df),
         mut_escape_df=mut_effects_df,
         data_to_fit=None,
+        sites=tuple(natsort.natsorted(mut_effects_df.site, alg=natsort.ns.SIGNED)),
         alphabet=polyclonal.alphabets.AAS_WITHSTOP_WITHGAP,
     )
 
@@ -222,6 +232,59 @@ def escape_fraction_prediction(
     for idx, row in alignment.iterrows():
         ret_json["nodes"][row.strain][
             f"{experiment_label}_escape_fraction"
+        ] = row.variant_escape_score
+
+    write_json(ret_json, output)
+
+@cli.command(name="additive-phenotype")
+@option(
+    "--phenotype-column",
+    required=False,
+    default="escape",
+    type=str,
+    help="",
+)
+@group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
+def additive_phenotype_prediction(
+    phenotype_column,
+    alignment,
+    mut_effects_df,
+    dms_wt_seq_id,
+    experiment_label,
+    output
+):
+    """
+    """
+
+    mut_effects_df = pd.read_csv(mut_effects_df)
+
+    if alignment[-2:] == "xz":
+        with lzma.open(alignment, "rt") as f:
+            alignment = fasta_to_df(f)
+    else:
+        alignment = fasta_to_df(open(alignment, "r"))
+
+    dms_wildtype = alignment.loc[dms_wt_seq_id, "seq"]
+    
+    alignment["aa_substitutions"] = alignment.seq.apply(
+        lambda aligned_seq: mutations(dms_wildtype, aligned_seq, set(mut_effects_df.aa_substitution))
+    )
+    alignment.reset_index(inplace=True)
+
+    def compute_variant_additive_phenotype(
+        aa_subs
+    ):
+        data = mut_effects_df[mut_effects_df['aa_substitution'].isin(aa_subs.split())]
+        return data[phenotype_column].sum()
+
+    alignment["variant_escape_score"] = alignment.aa_substitutions.apply(
+        lambda aa_subs: compute_variant_additive_phenotype(aa_subs)
+    )
+
+    ret_json = {"generated_by": {"program": "custom"}, "nodes": defaultdict(dict)}
+    for idx, row in alignment.iterrows():
+        ret_json["nodes"][row.strain][
+            f"{experiment_label}_additive_phenotype"
         ] = row.variant_escape_score
 
     write_json(ret_json, output)
