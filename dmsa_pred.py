@@ -20,7 +20,6 @@ import json
 import pandas as pd
 from click import Path, group, option, argument
 import click
-import natsort
 
 # existing deps
 from augur.utils import write_json
@@ -116,18 +115,10 @@ def cli():
     type=str,
     help="",
 )
-@option(
-    "--escape-column",
-    required=False,
-    default="escape",
-    type=str,
-    help="",
-)
 @group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
 def polyclonal_escape_prediction(
     activity_wt_df,
     concentrations,
-    escape_column,
     alignment,
     mut_effects_df,
     dms_wt_seq_id,
@@ -138,24 +129,18 @@ def polyclonal_escape_prediction(
     """
 
     concentrations = [float(item) for item in concentrations.split(',')]
-    mut_effects_df = pd.read_csv(mut_effects_df).rename({escape_column:"escape"}, axis=1)
+    mut_effects_df = pd.read_csv(mut_effects_df)
 
     # TODO remove these pre-emptively? or pass as parameter to script?
-    #sites_to_ignore = ["214a", "214b", "214c"]
-    #mut_effects_df = mut_effects_df[~mut_effects_df["site"].isin(sites_to_ignore)]
-    #mut_effects_df["escape"] = mut_effects_df["escape_median"]
-
-    # non_integer_sites = [s for s in mut_effects_df.sites if not s[-2].isnumeric()]
-
-    
-   
+    sites_to_ignore = ["214a", "214b", "214c"]
+    mut_effects_df = mut_effects_df[~mut_effects_df["site"].isin(sites_to_ignore)]
+    mut_effects_df["escape"] = mut_effects_df["escape_median"]
 
     # Instantiate a Polyclonal object with betas and wildtype activity.
     model = polyclonal.Polyclonal(
         activity_wt_df=pd.read_csv(activity_wt_df),
         mut_escape_df=mut_effects_df,
         data_to_fit=None,
-        sites=tuple(natsort.natsorted(mut_effects_df.site, alg=natsort.ns.SIGNED)),
         alphabet=polyclonal.alphabets.AAS_WITHSTOP_WITHGAP,
     )
 
@@ -167,8 +152,6 @@ def polyclonal_escape_prediction(
         alignment = fasta_to_df(open(alignment, "r"))
 
     # TODO does this really even need to be in nextstrain tree?
-
-    print(alignment)
     dms_wildtype = alignment.loc[dms_wt_seq_id, "seq"]
     
     # TODO N jobs? pandarallel apply()
