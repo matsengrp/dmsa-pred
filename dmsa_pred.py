@@ -1,8 +1,7 @@
-
 """
 @File: dmsa-pred_cli.py
 
-@Author: Jared Galloway
+@Author: Jared Galloway and Hugh Haddox
 
 Command line interface (CLI) for dmsa-pred.
 """
@@ -15,7 +14,6 @@ import lzma
 from collections import defaultdict
 import json
 import natsort
-# import argparse
 
 # dependencies
 import pandas as pd
@@ -31,28 +29,55 @@ from Bio.Seq import Seq
 import polyclonal
 
 # shared utilities
-# TODO Bio.Align may be faster?
-def fasta_to_df(fasta_file):
-    """simply convert a fasta to dataframe"""
-
+def parse_fasta_entries(open_fasta_file):
+    """Parse entries in a FASTA file, storing each in rows of a dataframe"""
+    
     ids, seqs = [], []
-    for seq_record in SeqIO.parse(fasta_file, "fasta"):  # (generator)
+    for seq_record in SeqIO.parse(open_fasta_file, "fasta"):
         ids.append(seq_record.id)
         seqs.append(str(seq_record.seq))
     return pd.DataFrame({"strain": ids, "seq": seqs}).set_index("strain")
 
+def fasta_to_df(fasta_file):
+    """Open a FASTA file, then read in each entry and store in a dataframe"""
+    
+    if fasta_file[-2:] == "xz":
+        with lzma.open(fasta_file, "rt") as f:
+            return parse_fasta_entries(f)
+    else:
+        with open(fasta_file) as f:
+            return parse_fasta_entries(f)
 
-def mutations(naive_aa, aa, allowed_subs):
-    """Amino acid substitutions between two sequences, in IMGT coordinates."""
+def get_mutations(seq1, seq2, allowed_mutations):
+    """Make a list of amino-acid mutations between two sequences"""
 
-    assert len(naive_aa) == len(aa)
+    assert len(seq1) == len(seq2)
     return " ".join(
         [
             f"{aa1}{pos+1}{aa2}"
-            for pos, (aa1, aa2) in enumerate(zip(naive_aa, aa))
-            if aa1 != aa2 and f"{aa1}{pos+1}{aa2}" in allowed_subs
+            for pos, (aa1, aa2) in enumerate(zip(seq1, seq2))
+            if aa1 != aa2 and f"{aa1}{pos+1}{aa2}" in allowed_mutations
         ]
     )
+
+def write_output_json(alignment_df, phenotype_col, output_json):
+    """
+    Write an output JSON for use in a Nextstrain workflow, storing DMS
+    predictions for each sequence in the alignment.
+    
+    Loops over entries in the dataframe and records predicted phenotypes,
+    grouping by strain to account for dataframes with multiple
+    predictions per strain (e.g., different polyclonal concentrations)
+    """
+    
+    ret_json = {
+        "generated_by": {"program": "dmsa-pred"},
+        "nodes": defaultdict(dict)
+    }
+    for strain, strain_df in alignment_df.groupby("strain"):
+        for idx, row in strain_df.iterrows():
+            ret_json["nodes"][strain][row['json_label']] = row[phenotype_col]
+    write_json(ret_json, output_json)
 
 # define all common options
 def group_options(*options):
@@ -69,19 +94,31 @@ alignment = option(
     "--alignment",
     required=True,
     type=Path(exists=True),
-    help="",
-)
-mut_effects_df = option(
-    "--mut-effects-df",
-    required=True,
-    type=Path(exists=True),
-    help="",
+    help="a FASTA file with a multiple-sequence alignment of input sequences",
 )
 dms_wt_seq_id = option(
     "--dms-wt-seq-id",
     required=True,
     type=str,
-    help="",
+    help="the name of the DMS wildtype sequence from the input FASTA file",
+)
+mut_effects_df = option(
+    "--mut-effects-df",
+    required=True,
+    type=Path(exists=True),
+    help="a dataframe giving the effects of mutations",
+)
+mut_effect_col = option(
+    "--mut-effect-col",
+    required=True,
+    type=str,
+    help="a column from mut_effects_df that gives the effect of the mutation",
+)
+site_col = option(
+    "--site-col",
+    required=True,
+    type=str,
+    help="a column from mut_effects_df that gives the site of the mutation",
 )
 experiment_label = option(
     "--experiment-label",
@@ -89,10 +126,15 @@ experiment_label = option(
     type=str,
     help="",
 )
-output = option(
-    "--output",
+output_json = option(
+    "--output-json",
     required=True,
-    help="Path where the phip dataset will be dump'd to netCDF",
+    help="an output JSON file for use in a Nextstrain workflow",
+)
+output_df = option(
+    "--output-df",
+    required=True,
+    help="an output dataframe with mutations and DMS predictions for each sequence in the input alignment",
 )
 
 # entry point
@@ -116,36 +158,30 @@ def cli():
     type=str,
     help="",
 )
-@option(
-    "--escape-column",
-    required=False,
-    default="escape",
-    type=str,
-    help="",
-)
-@group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
+@group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, experiment_label, output_json, output_df)
 def polyclonal_escape_prediction(
+    alignment,
+    dms_wt_seq_id,
+    mut_effects_df,
+    mut_effect_col,
     activity_wt_df,
     concentrations,
-    escape_column,
-    alignment,
-    mut_effects_df,
-    dms_wt_seq_id,
     experiment_label,
-    output
+    output_json,
+    output_df
 ):
     """
+    Use polyclonal to predict the probability of escape for variants in an
+    alignment
     """
+    
+    # Read in a dataframe with mutational effects. For polyclonal, these
+    # are mutational effects in the latent space.
+    mut_effects_df = pd.read_csv(mut_effects_df)
+    mut_effects_df.rename({mut_effect_col:"escape"}, axis=1, inplace=True)
 
-    concentrations = [float(item) for item in concentrations.split(',')]
-    mut_effects_df = pd.read_csv(mut_effects_df).rename({escape_column:"escape"}, axis=1)
-
-    # TODO remove these pre-emptively? or pass as parameter to script?
-    #sites_to_ignore = ["214a", "214b", "214c"]
-    #mut_effects_df = mut_effects_df[~mut_effects_df["site"].isin(sites_to_ignore)]
-    #mut_effects_df["escape"] = mut_effects_df["escape_median"]
-
-    # Instantiate a Polyclonal object with betas and wildtype activity.
+    # Instantiate a Polyclonal object with the above values and
+    # a dataframe of wildtype activities
     model = polyclonal.Polyclonal(
         activity_wt_df=pd.read_csv(activity_wt_df),
         mut_escape_df=mut_effects_df,
@@ -154,140 +190,159 @@ def polyclonal_escape_prediction(
         alphabet=polyclonal.alphabets.AAS_WITHSTOP_WITHGAP,
     )
 
-    # Mutation calling relative to the dms wildtype sequence.
-    if alignment[-2:] == "xz":
-        with lzma.open(alignment, "rt") as f:
-            alignment = fasta_to_df(f)
-    else:
-        alignment = fasta_to_df(open(alignment, "r"))
+    # Read in the input alignment FASTA. Then, for each sequence in the
+    # alignment, make a list of all mutations relative to the DMS WT sequence
+    alignment_df = fasta_to_df(alignment)
+    dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
+    alignment_df.reset_index(inplace=True)
+    alignment_df["aa_substitutions"] = alignment_df.seq.apply(
+        lambda seq: get_mutations(dms_wt_seq, seq, set(model.mutations))
+    )
 
-    # TODO does this really even need to be in nextstrain tree?
-    dms_wildtype = alignment.loc[dms_wt_seq_id, "seq"]
+    # For each sequence in the alignment, use polyclonal to predict
+    # its phenotype given its mutations. Do this for each input
+    # concentration.
+    concentrations = [float(item) for item in concentrations.split(',')]
+    alignment_df = model.prob_escape(
+        variants_df=alignment_df,
+        concentrations=concentrations
+    ).drop("seq", axis=1).reset_index()
+
+    # Write the dataframe of mutations and predicted scores to an
+    # output file
+    alignment_df['json_label'] = alignment_df['concentration'].apply(
+        lambda x: f"{experiment_label}_prob_escape_c_{x}"
+    )
+    alignment_df.to_csv(output_df, index=False)
     
-    # TODO N jobs? pandarallel apply()
-    alignment["aa_substitutions"] = alignment.seq.apply(
-        lambda aligned_seq: mutations(dms_wildtype, aligned_seq, set(model.mutations))
-    )
-    alignment.reset_index(inplace=True)
-
-    escape_probs = (
-        model.prob_escape(
-            variants_df=alignment, concentrations=concentrations
-        )
-        .drop("seq", axis=1)
-        .reset_index()
-    )
-
-    ret_json = {"generated_by": {"program": "polyclonal"}, "nodes": defaultdict(dict)}
-    for strain, strain_df in escape_probs.groupby("strain"):
-        for idx, row in strain_df.iterrows():
-            ret_json["nodes"][strain][
-                f"prob_escape_{experiment_label}_c_{row.concentration}"
-            ] = row.predicted_prob_escape
-
-    write_json(ret_json, output)
+    # Write the results to an output JSON for use in a Nextstrain workflow
+    write_output_json(alignment_df, 'predicted_prob_escape', output_json)
 
 @cli.command(name="escape-fraction")
-@group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
-def escape_fraction_prediction(
-    alignment,
-    mut_effects_df,
-    dms_wt_seq_id,
-    experiment_label,
-    output
-):
-    """
-    """
-
-    mut_effects_df = pd.read_csv(mut_effects_df)
-    mut_effects_df = mut_effects_df.assign(
-        non_escape_frac=(1-mut_effects_df["mut_escape_frac_epistasis_model"])
-    )
-
-    if alignment[-2:] == "xz":
-        with lzma.open(alignment, "rt") as f:
-            alignment = fasta_to_df(f)
-    else:
-        alignment = fasta_to_df(open(alignment, "r"))
-
-    dms_wildtype = alignment.loc[dms_wt_seq_id, "seq"]
-    
-    alignment["aa_substitutions"] = alignment.seq.apply(
-        lambda aligned_seq: mutations(dms_wildtype, aligned_seq, set(mut_effects_df.aa_substitution))
-    )
-    alignment.reset_index(inplace=True)
-
-    def compute_variant_escape_score(
-        aa_subs,
-        mut_effect_col = "non_escape_frac"
-    ):
-        data = mut_effects_df[mut_effects_df['aa_substitution'].isin(aa_subs.split())]
-        return 1-data[mut_effect_col].prod()
-
-    alignment["variant_escape_score"] = alignment.aa_substitutions.apply(
-        lambda aa_subs: compute_variant_escape_score(aa_subs)
-    )
-
-    ret_json = {"generated_by": {"program": "custom"}, "nodes": defaultdict(dict)}
-    for idx, row in alignment.iterrows():
-        ret_json["nodes"][row.strain][
-            f"{experiment_label}_escape_fraction"
-        ] = row.variant_escape_score
-
-    write_json(ret_json, output)
-
-@cli.command(name="additive-phenotype")
 @option(
-    "--phenotype-column",
-    required=False,
-    default="escape",
+    "--condition",
+    required=True,
     type=str,
     help="",
 )
-@group_options(alignment, mut_effects_df, dms_wt_seq_id, experiment_label, output)
-def additive_phenotype_prediction(
-    phenotype_column,
+@group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, site_col, experiment_label, output_json, output_df)
+def escape_fraction_prediction(
     alignment,
-    mut_effects_df,
     dms_wt_seq_id,
+    mut_effects_df,
+    mut_effect_col,
+    site_col,
+    condition,
     experiment_label,
-    output
+    output_json,
+    output_df
 ):
     """
+    Predict the escape fraction of variants in an alignment
     """
 
+    # Read in data on mutational effects, and subset to data for a specific
+    # selection condition
+    mut_effects_df = pd.read_csv(mut_effects_df)
+    
+    # TODO make "condition" an optional argument, and only execute the below
+    # line if the argument is provided
+    mut_effects_df = mut_effects_df[mut_effects_df['condition'] == condition]
+
+    # Add a column giving the amino-acid substitution for each row
+    mut_effects_df['aa_substitution'] = \
+        mut_effects_df['wildtype'] + \
+        mut_effects_df[site_col].astype('string') + \
+        mut_effects_df['mutation'] 
+
+    # Compute the fraction that does NOT escape. These values will be multiplied
+    # together below.
+    mut_effects_df['non_escape_frac'] = 1 - mut_effects_df[mut_effect_col]
+    
+    # Read in the input alignment FASTA. Then, for each sequence in the
+    # alignment, make a list of all mutations relative to the DMS WT sequence
+    alignment_df = fasta_to_df(alignment)
+    dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
+    alignment_df.reset_index(inplace=True)
+    allowed_subs = set(mut_effects_df['aa_substitution'])
+    alignment_df["aa_substitutions"] = alignment_df['seq'].apply(
+        lambda seq: get_mutations(dms_wt_seq, seq, allowed_subs)
+    )
+
+    # For each sequence in the alignment, compute its predicted fraction
+    # escape based on its mutations
+    def predict_escape_fraction(aa_subs):
+        data = mut_effects_df[
+            mut_effects_df['aa_substitution'].isin(aa_subs.split())
+        ]
+        return 1 - data['non_escape_frac'].prod()
+    
+    alignment_df["pred_escape_frac"] = alignment_df['aa_substitutions'].apply(
+        lambda x: predict_escape_fraction(x)
+    )
+
+    # Write the dataframe of mutations and predicted scores to an
+    # output file
+    alignment_df['json_label'] = f"{experiment_label}_escape_frac"
+    alignment_df.to_csv(output_df, index=False)
+    
+    # Write the results to an output JSON for use in a Nextstrain workflow
+    write_output_json(alignment_df, 'pred_escape_frac', output_json)
+    
+@cli.command(name="additive-phenotype")
+@group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, site_col, experiment_label, output_json, output_df)
+def additive_phenotype_prediction(
+    alignment,
+    dms_wt_seq_id,
+    mut_effects_df,
+    mut_effect_col,
+    site_col,
+    experiment_label,
+    output_json,
+    output_df
+):
+    """
+    Predict an additive phenotype of variants in an alignment
+    """
+
+    # Read in dataframe with mutation effects
     mut_effects_df = pd.read_csv(mut_effects_df)
 
-    if alignment[-2:] == "xz":
-        with lzma.open(alignment, "rt") as f:
-            alignment = fasta_to_df(f)
-    else:
-        alignment = fasta_to_df(open(alignment, "r"))
+    # Add a column that gives the aa substitution
+    mut_effects_df['aa_substitution'] = \
+        mut_effects_df['wildtype'] + \
+        mut_effects_df[site_col].astype('string') + \
+        mut_effects_df['mutation']
 
-    dms_wildtype = alignment.loc[dms_wt_seq_id, "seq"]
+    # Read in the input alignment FASTA. Then, for each sequence in the
+    # alignment, make a list of all mutations relative to the DMS WT sequence
+    alignment_df = fasta_to_df(alignment)
+    dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
+    alignment_df.reset_index(inplace=True)
+    allowed_subs = set(mut_effects_df['aa_substitution'])
+    alignment_df["aa_substitutions"] = alignment_df['seq'].apply(
+        lambda seq: get_mutations(dms_wt_seq, seq, allowed_subs)
+    )
+
+    # For each sequence in the alignment, compute its predicted phenotype
+    # based on its mutations, assuming mutational effects are additive
+    def predict_additive_phenotype(aa_subs):
+        data = mut_effects_df[
+            mut_effects_df['aa_substitution'].isin(aa_subs.split())
+        ]
+        return data[mut_effect_col].sum()
+
+    alignment_df["pred_score"] = alignment_df["aa_substitutions"].apply(
+        lambda x: predict_additive_phenotype(x)
+    )
+
+    # Write the dataframe of mutations and predicted scores to an
+    # output file
+    alignment_df['json_label'] = f"{experiment_label}_pred_score"
+    alignment_df.to_csv(output_df, index=False)
     
-    alignment["aa_substitutions"] = alignment.seq.apply(
-        lambda aligned_seq: mutations(dms_wildtype, aligned_seq, set(mut_effects_df.aa_substitution))
-    )
-    alignment.reset_index(inplace=True)
-
-    def compute_variant_additive_phenotype(
-        aa_subs
-    ):
-        data = mut_effects_df[mut_effects_df['aa_substitution'].isin(aa_subs.split())]
-        return data[phenotype_column].sum()
-
-    alignment["variant_escape_score"] = alignment.aa_substitutions.apply(
-        lambda aa_subs: compute_variant_additive_phenotype(aa_subs)
-    )
-
-    ret_json = {"generated_by": {"program": "custom"}, "nodes": defaultdict(dict)}
-    for idx, row in alignment.iterrows():
-        ret_json["nodes"][row.strain][
-            f"{experiment_label}_additive_phenotype"
-        ] = row.variant_escape_score
-
-    write_json(ret_json, output)
+    # Write the results to an output JSON for use in a Nextstrain workflow
+    write_output_json(alignment_df, 'pred_score', output_json)
 
 if __name__ == '__main__':
     cli()
