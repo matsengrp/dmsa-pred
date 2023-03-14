@@ -114,6 +114,7 @@ mut_effect_col = option(
     type=str,
     help="a column from mut_effects_df that gives the effect of the mutation",
 )
+# TODO remove this
 site_col = option(
     "--site-col",
     required=True,
