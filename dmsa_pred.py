@@ -75,6 +75,7 @@ def write_output_json(alignment_df, phenotype_col, output_json):
         "nodes": defaultdict(dict)
     }
     for strain, strain_df in alignment_df.groupby("strain"):
+        #ret_json["nodes"][strain]["DMS"] = 
         for idx, row in strain_df.iterrows():
             ret_json["nodes"][strain][row['json_label']] = row[phenotype_col]
     write_json(ret_json, output_json)
@@ -146,6 +147,38 @@ def cli():
     """
     pass
 
+
+#@cli.command(name="call-mutations")
+#@group_options(alignment, dms_wt_seq_id, output_json, output_df)
+#def call_mutations(
+#    alignment,
+#    dms_wt_seq_id,
+#    output_json,
+#    output_df
+#):
+#    """
+#    Read in the input alignment FASTA. Then, for each sequence in the
+#    # alignment, make a list of all mutations relative to the DMS WT sequence
+#    """
+#
+#    alignment_df = fasta_to_df(alignment)
+#    dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
+#    alignment_df.reset_index(inplace=True)
+#    alignment_df["aa_substitutions"] = alignment_df.seq.apply(
+#        lambda seq: get_mutations(dms_wt_seq, seq, set(model.mutations))
+#    )
+#    alignment_df.to_csv(output_df, index=False)
+#
+#    ret_json = {
+#        "generated_by": {"program": "dmsa-pred"},
+#        "nodes": defaultdict(dict)
+#    }
+#    for idx, row in alignment_df.iterrows():
+#        ret_json["nodes"][row.strain][f"dms_aa_subs_wrt_{dms_wt_seq_id}"] = row.aa_substitutions
+#
+#    write_json(ret_json, json_output)
+
+
 @cli.command(name="polyclonal-escape")
 @option(
     "--activity-wt-df",
@@ -196,9 +229,11 @@ def polyclonal_escape_prediction(
     alignment_df = fasta_to_df(alignment)
     dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
     alignment_df.reset_index(inplace=True)
-    alignment_df["aa_substitutions"] = alignment_df.seq.apply(
-        lambda seq: get_mutations(dms_wt_seq, seq, set(model.mutations))
+    #allowed_subs = set(mut_effects_df['aa_substitution'])
+    alignment_df["aa_substitutions"] = alignment_df['seq'].apply(
+        lambda seq: get_mutations(dms_wt_seq, seq, model.mutations)
     )
+
 
     # For each sequence in the alignment, use polyclonal to predict
     # its phenotype given its mutations. Do this for each input
