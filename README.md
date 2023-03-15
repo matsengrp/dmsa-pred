@@ -3,10 +3,7 @@
 A standalone package for predicting variant phenotypes given a multiple sequence alignment and DMS data.
 
 If this is used as a submodule to a nextflow build, use
-```
-git submodule update --init --recursive
-```
-To update the submodule.
+we reccomend following [this guide](https://gist.github.com/gitaarik/8735255) as a workflow
 
 When intergrating into an existing Nextstrain build, the primary steps to take are:
 
