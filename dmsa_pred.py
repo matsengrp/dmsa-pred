@@ -17,6 +17,7 @@ import natsort
 
 # dependencies
 import pandas as pd
+import numpy as np
 from click import Path, group, option, argument
 import click
 
@@ -188,8 +189,16 @@ def cli():
 )
 @option(
     "--concentrations",
-    required=True,
+    required=False,
+    default="0.0",
     type=str,
+    help="",
+)
+@option(
+    "--icxx",
+    required=False,
+    default=0.0,
+    type=float,
     help="",
 )
 @group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, experiment_label, output_json, output_df)
@@ -200,6 +209,7 @@ def polyclonal_escape_prediction(
     mut_effect_col,
     activity_wt_df,
     concentrations,
+    icxx,
     experiment_label,
     output_json,
     output_df
@@ -229,30 +239,52 @@ def polyclonal_escape_prediction(
     alignment_df = fasta_to_df(alignment)
     dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
     alignment_df.reset_index(inplace=True)
-    #allowed_subs = set(mut_effects_df['aa_substitution'])
     alignment_df["aa_substitutions"] = alignment_df['seq'].apply(
         lambda seq: get_mutations(dms_wt_seq, seq, model.mutations)
     )
+    alignment_df.drop('seq', axis=1, inplace=True)
 
+    node_attrs = []
 
-    # For each sequence in the alignment, use polyclonal to predict
-    # its phenotype given its mutations. Do this for each input
-    # concentration.
-    concentrations = [float(item) for item in concentrations.split(',')]
-    alignment_df = model.prob_escape(
-        variants_df=alignment_df,
-        concentrations=concentrations
-    ).drop("seq", axis=1).reset_index()
+    if icxx != 0.0:
 
-    # Write the dataframe of mutations and predicted scores to an
-    # output file
-    alignment_df['json_label'] = alignment_df['concentration'].apply(
-        lambda x: f"{experiment_label}_prob_escape_c_{x}"
-    )
+        col = f"{experiment_label}_ic{int(icxx*100)}"
+        model_preds = model.icXX(
+            variants_df=alignment_df,
+            x = icxx,
+            col = col 
+        )
+        alignment_df = alignment_df.merge(model_preds[["strain",col]], on="strain")
+        wt_icxx = model_preds.loc[alignment_df.strain == dms_wt_seq_id, col].values[0]
+        alignment_df[f"{col}_log_fold_change"] = np.log2(alignment_df[col] / wt_icxx)
+        node_attrs.append(f"{col}_log_fold_change")
+
+    if concentrations != "0.0":
+
+        concentrations = [float(item) for item in concentrations.split(',')]
+            
+        model_preds = model.prob_escape(
+            variants_df=alignment_df,
+            concentrations=concentrations
+        )
+
+        for con, con_model_preds in model_preds.groupby('concentration'):
+            alignment_df = alignment_df.merge(
+                con_model_preds[["strain","predicted_prob_escape"]], on="strain"
+            )
+            col = f"{experiment_label}_prob_escape_c_{con}"
+            alignment_df.rename({"predicted_prob_escape":col}, axis=1, inplace=True)
+            node_attrs.append(col)
+
+    ret_json = {
+        "generated_by": {"program": "dmsa-pred"},
+        "nodes": defaultdict(dict)
+    }
+    for idx, row in alignment_df.iterrows():
+        for attr in node_attrs:
+            ret_json["nodes"][row.strain][attr] = row[attr]
+    write_json(ret_json, output_json)
     alignment_df.to_csv(output_df, index=False)
-    
-    # Write the results to an output JSON for use in a Nextstrain workflow
-    write_output_json(alignment_df, 'predicted_prob_escape', output_json)
 
 @cli.command(name="escape-fraction")
 @option(
