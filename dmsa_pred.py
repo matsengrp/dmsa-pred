@@ -75,7 +75,6 @@ def write_output_json(alignment_df, phenotype_col, output_json):
         "nodes": defaultdict(dict)
     }
     for strain, strain_df in alignment_df.groupby("strain"):
-        #ret_json["nodes"][strain]["DMS"] = 
         for idx, row in strain_df.iterrows():
             ret_json["nodes"][strain][row['json_label']] = row[phenotype_col]
     write_json(ret_json, output_json)
