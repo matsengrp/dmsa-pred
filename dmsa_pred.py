@@ -115,6 +115,12 @@ mut_effect_col = option(
     type=str,
     help="a column from mut_effects_df that gives the effect of the mutation",
 )
+mutation_col = option(
+    "--mutation-col",
+    required=True,
+    type=str,
+    help="a column from mut_effects_df that gives the genotype of a variant i.e. <wt><site><mutation>",
+)
 # TODO remove this
 site_col = option(
     "--site-col",
@@ -200,12 +206,22 @@ def cli():
     type=float,
     help="",
 )
-@group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, experiment_label, output_json, output_df)
+@group_options(
+        alignment, 
+        dms_wt_seq_id, 
+        mut_effects_df, 
+        mut_effect_col, 
+        mutation_col, 
+        experiment_label, 
+        output_json, 
+        output_df
+)
 def polyclonal_escape_prediction(
     alignment,
     dms_wt_seq_id,
     mut_effects_df,
     mut_effect_col,
+    mutation_col,
     activity_wt_df,
     concentrations,
     icxx,
@@ -221,7 +237,14 @@ def polyclonal_escape_prediction(
     # Read in a dataframe with mutational effects. For polyclonal, these
     # are mutational effects in the latent space.
     mut_effects_df = pd.read_csv(mut_effects_df)
-    mut_effects_df.rename({mut_effect_col:"escape"}, axis=1, inplace=True)
+    mut_effects_df.rename(
+        {
+            mut_effect_col:"escape",
+            mutation_col:"mutation"
+        }, 
+        axis=1, 
+        inplace=True
+    )
 
     # Instantiate a Polyclonal object with the above values and
     # a dataframe of wildtype activities
@@ -285,131 +308,183 @@ def polyclonal_escape_prediction(
     write_json(ret_json, output_json)
     alignment_df.to_csv(output_df, index=False)
 
-@cli.command(name="escape-fraction")
+@cli.command(name="escape-prediction")
 @option(
-    "--condition",
-    required=True,
+    "--model-type",
+    required=False,
+    default="additive",
     type=str,
     help="",
 )
-@group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, site_col, experiment_label, output_json, output_df)
-def escape_fraction_prediction(
+@group_options(
+    alignment, 
+    dms_wt_seq_id, 
+    mut_effects_df, 
+    mut_effect_col, 
+    mutation_col, 
+    experiment_label, 
+    output_json, 
+    output_df
+)
+def variant_escape(
+    model_type,
     alignment,
     dms_wt_seq_id,
     mut_effects_df,
     mut_effect_col,
-    site_col,
-    condition,
+    mutation_col, 
     experiment_label,
     output_json,
     output_df
 ):
     """
-    Predict the escape fraction of variants in an alignment
+    Predict the escape of variants in an alignment using either the additive effects model or a
+    model of escape by the product of (1-escape) fractions.
     """
 
     # Read in data on mutational effects, and subset to data for a specific
     # selection condition
     mut_effects_df = pd.read_csv(mut_effects_df)
+
+    # TODO HERE no need to rename, just refer to the mutation column below
+    # TODO finish refactoring tyler's data to include a single condition each as well as the mutation column
+    #mut_effects_df.rename(
+    #    {
+    #        mutation_col:"aa_substitution"
+    #    }, 
+    #    axis=1, 
+    #    inplace=True
+    #)
     
     # TODO make "condition" an optional argument, and only execute the below
     # line if the argument is provided
-    mut_effects_df = mut_effects_df[mut_effects_df['condition'] == condition]
+    # mut_effects_df = mut_effects_df[mut_effects_df['condition'] == condition]
 
     # Add a column giving the amino-acid substitution for each row
-    mut_effects_df['aa_substitution'] = \
-        mut_effects_df['wildtype'] + \
-        mut_effects_df[site_col].astype('string') + \
-        mut_effects_df['mutation'] 
+    #mut_effects_df['aa_substitution'] = \
+    #    mut_effects_df['wildtype'] + \
+    #    mut_effects_df[site_col].astype('string') + \
+    #    mut_effects_df['mutation'] 
 
     # Compute the fraction that does NOT escape. These values will be multiplied
     # together below.
-    mut_effects_df['non_escape_frac'] = 1 - mut_effects_df[mut_effect_col]
     
     # Read in the input alignment FASTA. Then, for each sequence in the
     # alignment, make a list of all mutations relative to the DMS WT sequence
     alignment_df = fasta_to_df(alignment)
     dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
     alignment_df.reset_index(inplace=True)
-    allowed_subs = set(mut_effects_df['aa_substitution'])
+    allowed_subs = set(mut_effects_df[mutation_col])
     alignment_df["aa_substitutions"] = alignment_df['seq'].apply(
         lambda seq: get_mutations(dms_wt_seq, seq, allowed_subs)
     )
 
-    # For each sequence in the alignment, compute its predicted fraction
-    # escape based on its mutations
-    def predict_escape_fraction(aa_subs):
-        data = mut_effects_df[
-            mut_effects_df['aa_substitution'].isin(aa_subs.split())
-        ]
-        return 1 - data['non_escape_frac'].prod()
-    
-    alignment_df["pred_escape_frac"] = alignment_df['aa_substitutions'].apply(
-        lambda x: predict_escape_fraction(x)
-    )
+    # We are currently not using the escape fraction, but we'll leave it here
+    # for now in case we want to easily impliment it again.
 
-    # Write the dataframe of mutations and predicted scores to an
-    # output file
-    alignment_df['json_label'] = f"{experiment_label}_escape_frac"
+    if model_type == "fraction":
+        # For each sequence in the alignment, compute its predicted fraction
+        # escape based on its mutations
+        mut_effects_df['non_escape_frac'] = 1 - mut_effects_df[mut_effect_col]
+
+        def predict_escape_fraction(aa_subs):
+            data = mut_effects_df[
+                mut_effects_df[mutation_col].isin(aa_subs.split())
+            ]
+            return 1 - data['non_escape_frac'].prod()
+
+        alignment_df[f"fraction_escape"] = alignment_df['aa_substitutions'].apply(
+            lambda x: predict_escape_fraction(x)
+        )
+
+    elif model_type == "additive":
+
+        # For each sequence in the alignment, compute its predicted phenotype
+        # based on its mutations, assuming mutational effects are additive
+        def predict_additive_escape(aa_subs):
+            data = mut_effects_df[
+                mut_effects_df[mutation_col].isin(aa_subs.split())
+            ]
+            return data[mut_effect_col].sum()
+
+        alignment_df["additive_escape"] = alignment_df["aa_substitutions"].apply(
+            lambda x: predict_additive_escape(x)
+        )
+
+    else:
+        raise ValueError(f"model_type {model_type} is unknown, please specify either 'additive' or 'fraction'")
+
+    # TODO remove write_output_json
+    # Write the dataframe of mutations and predicted scores to an output file
+    # alignment_df['json_label'] = f"{experiment_label}_{model_type}_escape"
     alignment_df.to_csv(output_df, index=False)
     
     # Write the results to an output JSON for use in a Nextstrain workflow
-    write_output_json(alignment_df, 'pred_escape_frac', output_json)
+    # write_output_json(alignment_df, f"pred_{model_type}_escape", output_json)
+
+    ret_json = {
+        "generated_by": {"program": "dmsa-pred"},
+        "nodes": defaultdict(dict)
+    }
+    # for strain, strain_df in alignment_df.groupby("strain"):
+    for idx, row in alignment_df.iterrows():
+        ret_json["nodes"][row.strain][f"{experiment_label}_{model_type}_escape"] = row[f"{model_type}_escape"]
+    write_json(ret_json, output_json)
     
-@cli.command(name="additive-phenotype")
-@group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, site_col, experiment_label, output_json, output_df)
-def additive_phenotype_prediction(
-    alignment,
-    dms_wt_seq_id,
-    mut_effects_df,
-    mut_effect_col,
-    site_col,
-    experiment_label,
-    output_json,
-    output_df
-):
-    """
-    Predict an additive phenotype of variants in an alignment
-    """
-
-    # Read in dataframe with mutation effects
-    mut_effects_df = pd.read_csv(mut_effects_df)
-
-    # Add a column that gives the aa substitution
-    mut_effects_df['aa_substitution'] = \
-        mut_effects_df['wildtype'] + \
-        mut_effects_df[site_col].astype('string') + \
-        mut_effects_df['mutation']
-
-    # Read in the input alignment FASTA. Then, for each sequence in the
-    # alignment, make a list of all mutations relative to the DMS WT sequence
-    alignment_df = fasta_to_df(alignment)
-    dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
-    alignment_df.reset_index(inplace=True)
-    allowed_subs = set(mut_effects_df['aa_substitution'])
-    alignment_df["aa_substitutions"] = alignment_df['seq'].apply(
-        lambda seq: get_mutations(dms_wt_seq, seq, allowed_subs)
-    )
-
-    # For each sequence in the alignment, compute its predicted phenotype
-    # based on its mutations, assuming mutational effects are additive
-    def predict_additive_phenotype(aa_subs):
-        data = mut_effects_df[
-            mut_effects_df['aa_substitution'].isin(aa_subs.split())
-        ]
-        return data[mut_effect_col].sum()
-
-    alignment_df["pred_score"] = alignment_df["aa_substitutions"].apply(
-        lambda x: predict_additive_phenotype(x)
-    )
-
-    # Write the dataframe of mutations and predicted scores to an
-    # output file
-    alignment_df['json_label'] = f"{experiment_label}_pred_score"
-    alignment_df.to_csv(output_df, index=False)
-    
-    # Write the results to an output JSON for use in a Nextstrain workflow
-    write_output_json(alignment_df, 'pred_score', output_json)
+#@cli.command(name="additive-phenotype")
+#@group_options(alignment, dms_wt_seq_id, mut_effects_df, mut_effect_col, site_col, experiment_label, output_json, output_df)
+#def additive_phenotype_prediction(
+#    alignment,
+#    dms_wt_seq_id,
+#    mut_effects_df,
+#    mut_effect_col,
+#    site_col,
+#    experiment_label,
+#    output_json,
+#    output_df
+#):
+#    """
+#    Predict an additive phenotype of variants in an alignment
+#    """
+#
+#    # Read in dataframe with mutation effects
+#    mut_effects_df = pd.read_csv(mut_effects_df)
+#
+#    # Add a column that gives the aa substitution
+#    mut_effects_df['aa_substitution'] = \
+#        mut_effects_df['wildtype'] + \
+#        mut_effects_df[site_col].astype('string') + \
+#        mut_effects_df['mutation']
+#
+#    # Read in the input alignment FASTA. Then, for each sequence in the
+#    # alignment, make a list of all mutations relative to the DMS WT sequence
+#    alignment_df = fasta_to_df(alignment)
+#    dms_wt_seq = alignment_df.loc[dms_wt_seq_id, "seq"]
+#    alignment_df.reset_index(inplace=True)
+#    allowed_subs = set(mut_effects_df['aa_substitution'])
+#    alignment_df["aa_substitutions"] = alignment_df['seq'].apply(
+#        lambda seq: get_mutations(dms_wt_seq, seq, allowed_subs)
+#    )
+#
+#    # For each sequence in the alignment, compute its predicted phenotype
+#    # based on its mutations, assuming mutational effects are additive
+#    def predict_additive_phenotype(aa_subs):
+#        data = mut_effects_df[
+#            mut_effects_df['aa_substitution'].isin(aa_subs.split())
+#        ]
+#        return data[mut_effect_col].sum()
+#
+#    alignment_df["pred_score"] = alignment_df["aa_substitutions"].apply(
+#        lambda x: predict_additive_phenotype(x)
+#    )
+#
+#    # Write the dataframe of mutations and predicted scores to an
+#    # output file
+#    alignment_df['json_label'] = f"{experiment_label}_pred_score"
+#    alignment_df.to_csv(output_df, index=False)
+#    
+#    # Write the results to an output JSON for use in a Nextstrain workflow
+#    write_output_json(alignment_df, 'pred_score', output_json)
 
 if __name__ == '__main__':
     cli()
