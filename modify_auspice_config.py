@@ -53,12 +53,11 @@ if __name__ == "__main__":
                 })
 
 
-    if 'escape_fraction_models' in snake_config.keys():
-        for exp_label, exp_info in snake_config['escape_fraction_models'].items():
-            # for c in exp_info['concentrations'].split(","):
+    if 'escape_models' in snake_config.keys():
+        for exp_label, exp_info in snake_config['escape_models'].items():
             auspice_config['colorings'].append({
-                "key" : f"{exp_label}_escape_frac",
-                "title" : f"{exp_label}_escape_frac",
+                "key" : f"{exp_label}_additive_escape",
+                "title" : f"{exp_label}_additive_escape",
                 "type": "continuous",
                 "scale": [[0.0, "#2B83BA"], [0.5, "#FBC93D"], [1.0, "#D7191C"]],
                 "legend": [
