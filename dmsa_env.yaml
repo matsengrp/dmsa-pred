@@ -8,4 +8,4 @@ dependencies:
   - pip
   - pip:
     - polyclonal
-    - nextstrain-augur==19.2.0
+    - nextstrain-augur==21.0.0
