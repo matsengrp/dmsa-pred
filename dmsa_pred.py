@@ -308,7 +308,8 @@ def polyclonal_escape_prediction(
     write_json(ret_json, output_json)
     alignment_df.to_csv(output_df, index=False)
 
-@cli.command(name="escape-prediction")
+
+@cli.command(name="phenotype-prediction")
 @option(
     "--model-type",
     required=False,
@@ -326,7 +327,7 @@ def polyclonal_escape_prediction(
     output_json, 
     output_df
 )
-def variant_escape(
+def variant_phenotype(
     model_type,
     alignment,
     dms_wt_seq_id,
@@ -338,8 +339,8 @@ def variant_escape(
     output_df
 ):
     """
-    Predict the escape of variants in an alignment using either the additive effects model or a
-    model of escape by the product of (1-escape) fractions.
+    Predict the phenotype of variants in an alignment using either the additive effects model or a
+    model of phenotype by the product of (1-phenotype) fractions.
     """
 
     # Read in data on mutational effects, and subset to data for a specific
@@ -356,51 +357,55 @@ def variant_escape(
         lambda seq: get_mutations(dms_wt_seq, seq, allowed_subs)
     )
 
-    # We are currently not using the escape fraction, but we'll leave it here
+    # We are currently not using the phenotype fraction, but we'll leave it here
     # for now in case we want to easily impliment it again.
 
-    if model_type == "fraction":
+    if model_type == "fraction_escape":
         # For each sequence in the alignment, compute its predicted fraction
-        # escape based on its mutations
-        mut_effects_df['non_escape_frac'] = 1 - mut_effects_df[mut_effect_col]
+        # phenotype based on its mutations
+        mut_effects_df['non_phenotype_frac'] = 1 - mut_effects_df[mut_effect_col]
 
-        def predict_escape_fraction(aa_subs):
+        def predict_phenotype_fraction(aa_subs):
             data = mut_effects_df[
                 mut_effects_df[mutation_col].isin(aa_subs.split())
             ]
-            return 1 - data['non_escape_frac'].prod()
+            return 1 - data['non_phenotype_frac'].prod()
 
-        alignment_df[f"fraction_escape"] = alignment_df['aa_substitutions'].apply(
-            lambda x: predict_escape_fraction(x)
+        alignment_df[model_type] = alignment_df['aa_substitutions'].apply(
+            lambda x: predict_phenotype_fraction(x)
         )
 
     elif model_type == "additive":
 
         # For each sequence in the alignment, compute its predicted phenotype
         # based on its mutations, assuming mutational effects are additive
-        def predict_additive_escape(aa_subs):
+        def predict_additive_phenotype(aa_subs):
             data = mut_effects_df[
                 mut_effects_df[mutation_col].isin(aa_subs.split())
             ]
             return data[mut_effect_col].sum()
 
-        alignment_df["additive_escape"] = alignment_df["aa_substitutions"].apply(
-            lambda x: predict_additive_escape(x)
+        alignment_df[model_type] = alignment_df["aa_substitutions"].apply(
+            lambda x: predict_additive_phenotype(x)
         )
 
     else:
-        raise ValueError(f"model_type {model_type} is unknown, please specify either 'additive' or 'fraction'")
+        raise ValueError(f"model_type {model_type} is unknown, please specify either 'additive' or 'fraction_escape'")
 
     # Write the dataframe of mutations and predicted scores to an output file
-    # alignment_df['json_label'] = f"{experiment_label}_{model_type}_escape"
+    # alignment_df['json_label'] = f"{experiment_label}_{model_type}_phenotype"
     alignment_df.to_csv(output_df, index=False)
     
-    # write_output_json(alignment_df, f"pred_{model_type}_escape", output_json)
+    # write_output_json(alignment_df, f"pred_{model_type}_phenotype", output_json)
     ret_json = {
         "generated_by": {"program": "dmsa-pred"},
         "nodes": defaultdict(dict)
     }
     # for strain, strain_df in alignment_df.groupby("strain"):
     for idx, row in alignment_df.iterrows():
-        ret_json["nodes"][row.strain][f"{experiment_label}_{model_type}_escape"] = row[f"{model_type}_escape"]
+        ret_json["nodes"][row.strain][experiment_label] = row[model_type]
     write_json(ret_json, output_json)
+
+
+if __name__ == '__main__':
+    cli()
