@@ -360,7 +360,7 @@ def variant_phenotype(
     # We are currently not using the phenotype fraction, but we'll leave it here
     # for now in case we want to easily impliment it again.
 
-    if model_type == "fraction":
+    if model_type == "fraction_escape":
         # For each sequence in the alignment, compute its predicted fraction
         # phenotype based on its mutations
         mut_effects_df['non_phenotype_frac'] = 1 - mut_effects_df[mut_effect_col]
@@ -371,7 +371,7 @@ def variant_phenotype(
             ]
             return 1 - data['non_phenotype_frac'].prod()
 
-        alignment_df[f"fraction_phenotype"] = alignment_df['aa_substitutions'].apply(
+        alignment_df[model_type] = alignment_df['aa_substitutions'].apply(
             lambda x: predict_phenotype_fraction(x)
         )
 
@@ -385,12 +385,12 @@ def variant_phenotype(
             ]
             return data[mut_effect_col].sum()
 
-        alignment_df["additive_phenotype"] = alignment_df["aa_substitutions"].apply(
+        alignment_df[model_type] = alignment_df["aa_substitutions"].apply(
             lambda x: predict_additive_phenotype(x)
         )
 
     else:
-        raise ValueError(f"model_type {model_type} is unknown, please specify either 'additive' or 'fraction'")
+        raise ValueError(f"model_type {model_type} is unknown, please specify either 'additive' or 'fraction_escape'")
 
     # Write the dataframe of mutations and predicted scores to an output file
     # alignment_df['json_label'] = f"{experiment_label}_{model_type}_phenotype"
@@ -403,7 +403,7 @@ def variant_phenotype(
     }
     # for strain, strain_df in alignment_df.groupby("strain"):
     for idx, row in alignment_df.iterrows():
-        ret_json["nodes"][row.strain][f"{experiment_label}_{model_type}_phenotype"] = row[f"{model_type}_phenotype"]
+        ret_json["nodes"][row.strain][experiment_label] = row[model_type]
     write_json(ret_json, output_json)
 
 
