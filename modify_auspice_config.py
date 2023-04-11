@@ -22,7 +22,7 @@ if __name__ == "__main__":
 
             if 'concentrations' in exp_info:
                 for c in exp_info['concentrations'].split(","):
-                    auspice_config['colorings'].append({
+                    auspice_config['colorings'].insert(0, {
                         "key" : f"{exp_label}_prob_escape_c_{c}",
                         "title" : f"{exp_label}_prob_escape_c_{c}",
                         "type": "continuous",
@@ -39,7 +39,7 @@ if __name__ == "__main__":
                     
             if 'icxx' in exp_info:
                 col = f"ic{int(exp_info['icxx']*100)}_log_fold_change"
-                auspice_config['colorings'].append({
+                auspice_config['colorings'].insert(0, {
                     "key" : f"{exp_label}_{col}",
                     "title" : f"{exp_label}_{col}",
                     "type": "continuous",
@@ -59,7 +59,7 @@ if __name__ == "__main__":
 
     if 'escape_models' in snake_config.keys():
         for exp_label, exp_info in snake_config['escape_models'].items():
-            auspice_config['colorings'].append({
+            auspice_config['colorings'].insert(0, {
                 "key" : f"{exp_label}",
                 "title" : f"{exp_label}",
                 "type": "continuous",
