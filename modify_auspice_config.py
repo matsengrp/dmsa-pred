@@ -14,10 +14,11 @@ if __name__ == "__main__":
 
     auspice_config = json.load(open(args.auspice_config_path, "r"))
     snake_config = yaml.safe_load(open(args.snake_config_path, "r"))
-
+    at_least_one = False
     
 
     if 'polyclonal_serum_models' in snake_config.keys():
+        at_least_one = True
         for exp_label, exp_info in snake_config['polyclonal_serum_models'].items():
 
             if 'concentrations' in exp_info:
@@ -58,6 +59,7 @@ if __name__ == "__main__":
 
 
     if 'escape_models' in snake_config.keys():
+        at_least_one = True
         for exp_label, exp_info in snake_config['escape_models'].items():
             auspice_config['colorings'].insert(0, {
                 "key" : f"{exp_label}",
@@ -74,5 +76,8 @@ if __name__ == "__main__":
                         {"value": 1.0, "display": "1.0", "bounds": [0.875, 100]}
                     ]
             })
-
+    
+    if at_least_one:
+        first_coloring = auspice_config['colorings'][0]['key']
+        auspice_config["display_defaults"]["color_by"] = first_coloring
     write_json(auspice_config, args.output_config_path, include_version=False)
