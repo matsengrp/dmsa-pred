@@ -270,7 +270,7 @@ def polyclonal_escape_prediction(
 
     if icxx != 0.0:
 
-        col = f"{experiment_label}_ic{int(icxx*100)}"
+        col = f"{experiment_label}_IC{int(icxx*100)}"
         model_preds = model.icXX(
             variants_df=alignment_df,
             x = icxx,
