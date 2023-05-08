@@ -270,7 +270,7 @@ def polyclonal_escape_prediction(
 
     if icxx != 0.0:
 
-        col = f"{experiment_label}_ic{int(icxx*100)}"
+        col = f"{experiment_label}_IC{int(icxx*100)}"
         model_preds = model.icXX(
             variants_df=alignment_df,
             x = icxx,
@@ -278,7 +278,7 @@ def polyclonal_escape_prediction(
         )
         alignment_df = alignment_df.merge(model_preds[["strain",col]], on="strain")
         wt_icxx = model_preds.loc[alignment_df.strain == dms_wt_seq_id, col].values[0]
-        alignment_df[f"{col}_log_fold_change"] = np.log2(alignment_df[col] / wt_icxx)
+        alignment_df[f"{col}_log_fold_change"] = np.log10(alignment_df[col] / wt_icxx)
         node_attrs.append(f"{col}_log_fold_change")
 
     if concentrations != "0.0":
