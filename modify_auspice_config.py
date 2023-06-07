@@ -96,15 +96,15 @@ if __name__ == "__main__":
                     "title" : f"{exp_label}_{col}",
                     "type": "continuous",
                     "scale": [
-                        [-2.0, "#E1C1F1"], [0.0, "#2B83BA"], [2, "#FBC93D"], [4, "#D7191C"]
+                        [-1.0, "#E1C1F1"], [0.0, "#2B83BA"], [1, "#FBC93D"], [2, "#D7191C"]
                     ],
                     "legend": [
-                        {"value": -1.0, "display": "-1.0", "bounds": [-10.0, -0.5]},
-                        {"value": 0.0, "display": "0.0", "bounds": [-0.5, 0.5]},
-                        {"value": 1.0, "display": "1.0", "bounds": [0.5, 1.5]},
-                        {"value": 2.0, "display": "2.0", "bounds": [1.5, 2.5]},
-                        {"value": 3.0, "display": "3.0", "bounds": [2.5, 3.5]},
-                        {"value": 4.0, "display": "4.0", "bounds": [3.5, 10.0]},
+                        {"value": -0.5, "display": "-1.0", "bounds": [-10.0, -0.25]},
+                        {"value": 0.0, "display": "0.0", "bounds": [-0.25, 0.25]},
+                        {"value": 0.5, "display": "0.5", "bounds": [0.25, 0.75]},
+                        {"value": 1.0, "display": "1.0", "bounds": [0.75, 1.25]},
+                        {"value": 1.5, "display": "1.5", "bounds": [1.25, 1.75]},
+                        {"value": 2.0, "display": "2.0", "bounds": [1.75, 10.0]},
                     ]
                 })
 
