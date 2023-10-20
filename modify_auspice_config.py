@@ -24,6 +24,49 @@ if __name__ == "__main__":
         }
     ]
     
+    # A dictionary with predefined scales/legends, keyed by a tupple of the min and max
+    # phenotype values
+    predefined_legend_dict = {
+        (0, 1) : {
+            "scale": [
+                [0, "#2B83BA"], [1, "#D7191C"]
+            ],
+            "legend": [
+                {"value": 0.0, "display": "0.0", "bounds": [0.00, 0.125]},
+                {"value": 0.25, "display": "0.25", "bounds": [0.125, 0.375]},
+                {"value": 0.5, "display": "0.5", "bounds": [0.375, 0.625]},
+                {"value": 0.75, "display": "0.75", "bounds": [0.625, 0.875]},
+                {"value": 1.0, "display": "1.0", "bounds": [0.875, 1.00]}
+            ]
+        },
+        (0, 5) : {
+            "scale": [
+                [0, "#2B83BA"], [5, "#D7191C"]
+            ],
+            "legend": [
+                {"value": 0, "display": "0", "bounds": [0.0, 0.5]},
+                {"value": 1, "display": "1", "bounds": [0.5, 1.5]},
+                {"value": 2, "display": "2", "bounds": [1.5, 2.5]},
+                {"value": 3, "display": "3", "bounds": [2.5, 3.5]},
+                {"value": 4, "display": "4", "bounds": [3.5, 4.5]},
+                {"value": 5, "display": "5", "bounds": [4.5, 5.0]}
+            ]
+        },
+        (-6, 6) : {
+            "scale": [
+                [-6, "#2B83BA"], [0, "#EEEEEE"], [6, "#D7191C"]
+            ],
+            "legend": [
+                {"value": -6, "display": "-6", "bounds": [-6, -5]},
+                {"value": -4, "display": "-4", "bounds": [-5, -3]},
+                {"value": -2, "display": "-2", "bounds": [-3, -1]},
+                {"value": 0, "display": "0", "bounds": [-1, 1]},
+                {"value": 2, "display": "2", "bounds": [1, 3]},
+                {"value": 4, "display": "4", "bounds": [3, 5]},
+                {"value": 6, "display": "6", "bounds": [5, 6]},
+            ]
+        },
+    }
 
     if 'polyclonal_serum_models' in snake_config.keys():
         at_least_one = True
@@ -69,21 +112,19 @@ if __name__ == "__main__":
     if 'escape_models' in snake_config.keys():
         at_least_one = True
         for exp_label, exp_info in snake_config['escape_models'].items():
-            auspice_config['colorings'].insert(0, {
+            
+            # Get the min and max predicted phenotype and use these values to set
+            # the color scale and a matching legend if predefined
+            min_pred_pheno = exp_info['min_pred_pheno']
+            max_pred_pheno = exp_info['max_pred_pheno']
+            colorings_dict = {
                 "key" : f"{exp_label}",
                 "title" : f"{exp_label}",
                 "type": "continuous",
-                    "scale": [
-                        [0.0, "#2B83BA"], [0.5, "#FBC93D"], [1.0, "#D7191C"]
-                    ],
-                    "legend": [
-                        {"value": 0.0, "display": "0.0", "bounds": [0.0, 0.125]},
-                        {"value": 0.25, "display": "0.25", "bounds": [0.125, 0.375]},
-                        {"value": 0.5, "display": "0.5", "bounds": [0.375, 0.625]},
-                        {"value": 0.75, "display": "0.75", "bounds": [0.625, 0.875]},
-                        {"value": 1.0, "display": "1.0", "bounds": [0.875, 2]}
-                    ]
-            })
+            }
+            if (min_pred_pheno, max_pred_pheno) in predefined_legend_dict:
+                colorings_dict.update(predefined_legend_dict[(min_pred_pheno, max_pred_pheno)])
+            auspice_config['colorings'].insert(0, colorings_dict)
     
     if at_least_one:
         first_coloring = auspice_config['colorings'][0]['key']
