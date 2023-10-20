@@ -8,22 +8,22 @@ rule prepare_sequences:
     conda: "../../../workflow/envs/nextstrain.yaml"
     shell:
         """
-        cp {params.local_path} {output.sequences}
+        cat {params.local_path} | xz -c -d > {output.sequences}
         """
 
 # TODO how does metadata work?
 # looks like select strains is the smk for parsing fasta fields.
-# rule prepare_metadata:
-#     output:
-#         # titers="data/{lineage}/raw_{segment}.tsv"
-#         titers="data/{lineage}/metadata_{segment}.tsv"
-#     params:
-#         local_path=config['metadata']
-#     conda: "../../../workflow/envs/nextstrain.yaml"
-#     shell:
-#         """
-#         ln -s {params.local_path} {output.titers}
-#         """
+rule prepare_metadata:
+    output:
+        # titers="data/{lineage}/raw_{segment}.tsv"
+        titers="data/{lineage}/metadata_{segment}.tsv"
+    params:
+        local_path=config['metadata']
+    conda: "../../../workflow/envs/nextstrain.yaml"
+    shell:
+        """
+        cat {params.local_path} | xz -c -d > {output.titers}
+        """
 
 import os
 # predict escape on the HA segment translations.
@@ -44,9 +44,6 @@ rule variant_escape_prediction:
             config["dmsa_phenotype_collections"].get(w.collection)['mut_effects_dir'], 
             w.experiment
         ),
-        # dms_wt_seq_id = params.kwargs["dms_wt_seq_id"],
-        # mut_effect_col = kwargs["mut_effect_col"],
-        # mutation_col = kwargs["mutation_col"],
         alignment = lambda w: build_dir + f"/{w.build_name}/{w.segment}/nextalign/masked.gene.HA_withInternalNodes.fasta"
     conda:
         "dmsa_env.yaml"
