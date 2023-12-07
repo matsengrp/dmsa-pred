@@ -40,6 +40,7 @@ rule variant_escape_prediction:
         dms_wt_seq_id = lambda w: config["dmsa_phenotype_collections"].get(w.collection)['dms_wt_seq_id'],
         mut_effect_col = lambda w: config["dmsa_phenotype_collections"].get(w.collection)['mut_effect_col'],
         mutation_col = lambda w: config["dmsa_phenotype_collections"].get(w.collection)['mutation_col'],
+        allow_unmeasured_aa_subs_at_these_sites = lambda w: config["dmsa_phenotype_collections"].get(w.collection)['allow_unmeasured_aa_subs_at_these_sites'],
         mut_effects_df = lambda w: os.path.join(
             config["dmsa_phenotype_collections"].get(w.collection)['mut_effects_dir'], 
             w.experiment
@@ -58,6 +59,7 @@ rule variant_escape_prediction:
             --mut-effects-df {params.mut_effects_df} \
             --mut-effect-col {params.mut_effect_col} \
             --mutation-col {params.mutation_col} \
+            --allow-unmeasured-aa-subs-at-these-sites {params.allow_unmeasured_aa_subs_at_these_sites} \
             --experiment-label {wildcards.experiment} \
             --output-json {output.node_data} \
             --output-df {output.pred_data} 2>&1 | tee {log}
