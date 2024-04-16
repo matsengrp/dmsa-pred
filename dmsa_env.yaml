@@ -1,6 +1,10 @@
 name: dmsa-pred
+channels:
+  - conda-forge
+  - bioconda
 dependencies:
-  - python=3.9
+  - augur==21.0.1
+  - pyyaml
   - click
   - numpy
   - pandas
@@ -8,4 +12,3 @@ dependencies:
   - pip
   - pip:
     - polyclonal
-    - nextstrain-augur==21.0.1
