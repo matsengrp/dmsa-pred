@@ -2,10 +2,10 @@ name: dmsa-pred
 dependencies:
   - python=3.9
   - click
-  - numpy
-  - pandas
+  - numpy=1.25.1
+  - pandas=1.5.3
   - biopython
   - pip
   - pip:
-    - polyclonal
+    - polyclonal==6.2
     - nextstrain-augur==19.2.0
